@@ -3,7 +3,6 @@ import random
 
 
 
-
 class Vowel:
     def __init__(self, F1, F2):
         self.F1 = F1
@@ -26,8 +25,6 @@ class Consonant:
     def utter(self, vowel, length=1):
         return [norm.rvs(loc=self.bursts[vowel], scale=1.5, size=length)]
 
-
-
 vowels = {
     'a': Vowel(13, 19),
     'e': Vowel(10, 22),
@@ -41,8 +38,6 @@ consonants = {
     't': Consonant(27, 29, 25),
     'k': Consonant(19, 23, 21)
 }
-
-
 
 class Word:
     def __init__(self, phonseq):
@@ -62,7 +57,26 @@ class Word:
 
         return sequence
 
+# Cohort 1
+pitaku = Word('pitaku')
+pipiti = Word('pipiti')
+pikita = Word('pikita')
+pituka = Word('pituka')
 
+# Cohort 2
+katuka = Word('katuka')
+katuti = Word('katuti')
+katupu = Word('katupu')
+katupa = Word('katupa')
+
+# Unique
+tutapa = Word('tutapa')
+pupupu = Word('pupupu')
+kipiti = Word('kipiti')
+tapika = Word('tapika')
+
+
+# Test
 pati = Word("pati")
 print(pati.utterance(1))
 
