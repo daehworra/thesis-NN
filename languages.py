@@ -9,10 +9,10 @@ class Vowel:
         self.F2 = F2
 
     def utter(self, length=1):
-        rand_F1 = norm.rvs(loc=self.F1, scale=1, size=length*4)
-        rand_F2 = norm.rvs(loc=self.F2, scale=1, size=length*4)
+        rand_F1 = norm.rvs(loc=self.F1, scale=1, size=length)
+        rand_F2 = norm.rvs(loc=self.F2, scale=1, size=length)
 
-        return [(rand_F1[i], rand_F2[i]) for i in range(length*4)]
+        return [(rand_F1[i], rand_F2[i]) for i in range(length)]
 
 class Consonant:
     def __init__(self, a_burst, i_burst, u_burst):
@@ -23,7 +23,9 @@ class Consonant:
         }
 
     def utter(self, vowel, length=1):
-        return [norm.rvs(loc=self.bursts[vowel], scale=1.5, size=length)]
+        F1_list = norm.rvs(loc=self.bursts[vowel], scale=1.5, size=length)
+
+        return [(F1, 0) for F1 in F1_list]
 
 vowels = {
     'a': Vowel(13, 19),
@@ -75,10 +77,23 @@ pupupu = Word('pupupu')
 kipiti = Word('kipiti')
 tapika = Word('tapika')
 
+class Language:
+    def __init__(self, words):
+        self.words = words
+        self.word_labels = [word.phonseq for word in self.words]
 
-# Test
-pati = Word("pati")
-print(pati.utterance(1))
+    def add_word(self, word):
+        self.words.append(word)
+        self.word_labels.append(word.phonseq)
+
+    def random_utterance(self, length=1):
+        word = random.choice(self.words)
+        return word.utterance(length), word
 
 
     
+main_language = Language([pitaku, pituka, pikita, pipiti, katuka, katuti, katupu, katupa, tutapa, pupupu, kipiti, tapika])
+
+print(main_language.random_utterance(1))
+
+print(consonants['k'].utter("i", 3))
