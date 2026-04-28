@@ -118,33 +118,41 @@ def train_model(epochs=10000, lr=1e-2):
     return best_rnn, best_loss, best_epoch
 
 
-def test_single_random_word(rnn, top_k=None):
-    """Evaluate the model on a single random word and print timestep probabilities.
+def test_single_word(rnn, top_k=None, label="rand"):
+    """Evaluate the model on a single (random) word and print timestep probabilities.
 
     Args:
         rnn: trained RNN instance.
         top_k: if provided, only print the top-k predicted words at each timestep.
+        label: if provided, function uses the existing word with the label/phonseq provided.
 
     Returns:
         sequence: the input utterance as a list of formant tuples.
         word: the Word object selected for testing.
         probs: dictionary of softmax probabilities at each timestep.
     """
-    sequence, word = main_language.random_utterance(length=1)
+    if label == "rand":
+        sequence, word = main_language.random_utterance(length=1)
+    else:
+        wrd_idx = main_language.word_labels.index(label)
+        word = main_language.words[wrd_idx]
+        sequence = word.utterance()
+
     inputs = utterance_to_input(sequence)
     probs = rnn.predict(inputs)
+    
 
-    print(f"Testing random word: {word.phonseq}")
+    print(f"Testing random word: {label}")
     print(f"Utterance sequence: {sequence}")
     print()
 
     for t in range(len(inputs)):
         prob = probs[t].flatten()
-        prefix = word.phonseq[: t + 1]
+        prefix = label[: t + 1]
         print(f"Timestep {t}, prefix='{prefix}':")
         if top_k is None:
-            for label, p in zip(main_language.word_labels, prob):
-                print(f"  {label}: {p:.4f}")
+            for label2, p in zip(main_language.word_labels, prob):
+                print(f"  {label2}: {p:.4f}")
         else:
             top_indices = np.argsort(prob)[::-1][:top_k]
             for i in top_indices:
@@ -155,5 +163,8 @@ def test_single_random_word(rnn, top_k=None):
 
 
 if __name__ == "__main__":
-    best_rnn, best_loss, best_epoch = train_model()
-    test_single_random_word(best_rnn)
+    best_rnn, best_loss, best_epoch = train_model(epochs=20000)
+    test_single_word(best_rnn, label="pitaku")
+    test_single_word(best_rnn, label="katupa")
+    test_single_word(best_rnn, label="pupupu")
+    test_single_word(best_rnn, label="tutapa")
