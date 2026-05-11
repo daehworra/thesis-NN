@@ -7,7 +7,7 @@ class InputLayer:
     """Project input vectors into the RNN hidden state space."""
 
     def __init__(self, input_size, hidden_size):
-        self.W = np.random.randn(hidden_size, input_size) * 0.01
+        self.Wxh = np.random.randn(hidden_size, input_size) * 0.01
         self.b = np.zeros((hidden_size, 1))
 
     def forward(self, X):
@@ -19,7 +19,7 @@ class InputLayer:
         Returns:
             Projected input of shape (hidden_size, 1).
         """
-        return np.dot(self.W, X) + self.b
+        return np.dot(self.Wxh, X) + self.b
 
 
 class HiddenLayer:
@@ -111,7 +111,7 @@ class RNN:
             targets: list of target distributions for each timestep.
             lr: learning rate.
         """
-        dWxh = np.zeros_like(self.input_layer.W)
+        dWxh = np.zeros_like(self.input_layer.Wxh)
         dbx = np.zeros_like(self.input_layer.b)
 
         dWhh = np.zeros_like(self.hidden_layer.W_hh)
@@ -144,7 +144,7 @@ class RNN:
         for d in [dWxh, dWhh, dWhy, dbh, dby, dbx]:
             np.clip(d, -5, 5, out=d)
 
-        self.input_layer.W -= lr * dWxh
+        self.input_layer.Wxh -= lr * dWxh
         self.input_layer.b -= lr * dbx
         self.hidden_layer.W_hh -= lr * dWhh
         self.hidden_layer.b_h -= lr * dbh
@@ -154,7 +154,7 @@ class RNN:
     def get_params(self):
         """Return a copy of the model parameters."""
         return {
-            "Wxh": self.input_layer.W.copy(),
+            "Wxh": self.input_layer.Wxh.copy(),
             "bx": self.input_layer.b.copy(),
             "Whh": self.hidden_layer.W_hh.copy(),
             "bh": self.hidden_layer.b_h.copy(),
@@ -164,7 +164,7 @@ class RNN:
 
     def set_params(self, params):
         """Load model parameters from a saved dictionary."""
-        self.input_layer.W = params["Wxh"].copy()
+        self.input_layer.Wxh = params["Wxh"].copy()
         self.input_layer.b = params["bx"].copy()
         self.hidden_layer.W_hh = params["Whh"].copy()
         self.hidden_layer.b_h = params["bh"].copy()
