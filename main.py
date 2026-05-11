@@ -1,8 +1,8 @@
 """Training and evaluation utilities for the RNN word recognizer."""
-
+import matplotlib.pyplot as plt
 import numpy as np
 from network import RNN
-from languages import main_language
+from languages import main_language, vowels
 
 erb_bins = np.linspace(4, 30, 30)
 
@@ -163,8 +163,15 @@ def test_single_word(rnn, top_k=None, label="rand"):
 
 
 if __name__ == "__main__":
-    best_rnn, best_loss, best_epoch = train_model(epochs=20000)
-    test_single_word(best_rnn, label="pitaku")
-    test_single_word(best_rnn, label="katupa")
-    test_single_word(best_rnn, label="pupupu")
-    test_single_word(best_rnn, label="tutapa")
+    # best_rnn, best_loss, best_epoch = train_model(epochs=20000)
+    # test_single_word(best_rnn, label="pitaku")
+    # test_single_word(best_rnn, label="katupa")
+    # test_single_word(best_rnn, label="pupupu")s
+    # test_single_word(best_rnn, label="tutapa")
+
+    test_vowel = vowels['a'].utter(1)
+    # input = utterance_to_input(test_vowel)
+    # plt.plot(erb_bins, np.squeeze(input))
+    # plt.xlabel('ERB-step on basilar membrane')
+    # plt.ylabel('activation')
+    # plt.show()
