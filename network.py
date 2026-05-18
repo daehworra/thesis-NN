@@ -151,6 +151,45 @@ class RNN:
         self.output_layer.W -= lr * dWhy
         self.output_layer.b -= lr * dby
 
+    def backward_mse(self, xs, hs, ys, targets, lr=1e-3):
+        """Backpropagate through time for raw linear outputs and MSE loss."""
+        dWxh = np.zeros_like(self.input_layer.Wxh)
+        dbx = np.zeros_like(self.input_layer.b)
+
+        dWhh = np.zeros_like(self.hidden_layer.W_hh)
+        dbh = np.zeros_like(self.hidden_layer.b_h)
+
+        dWhy = np.zeros_like(self.output_layer.W)
+        dby = np.zeros_like(self.output_layer.b)
+
+        dh_next = np.zeros((self.hidden_size, 1))
+
+        for t in reversed(range(len(xs))):
+            dy = 2 * (ys[t] - targets[t]) / ys[t].size
+
+            dWhy += np.dot(dy, hs[t].T)
+            dby += dy
+
+            dh = np.dot(self.output_layer.W.T, dy) + dh_next
+            dh_raw = (1 - hs[t] ** 2) * dh
+
+            dbh += dh_raw
+            dWhh += np.dot(dh_raw, hs[t - 1].T)
+            dWxh += np.dot(dh_raw, xs[t].T)
+            dbx += dh_raw
+
+            dh_next = np.dot(self.hidden_layer.W_hh.T, dh_raw)
+
+        for d in [dWxh, dWhh, dWhy, dbh, dby, dbx]:
+            np.clip(d, -5, 5, out=d)
+
+        self.input_layer.Wxh -= lr * dWxh
+        self.input_layer.b -= lr * dbx
+        self.hidden_layer.W_hh -= lr * dWhh
+        self.hidden_layer.b_h -= lr * dbh
+        self.output_layer.W -= lr * dWhy
+        self.output_layer.b -= lr * dby
+
     def get_params(self):
         """Return a copy of the model parameters."""
         return {
