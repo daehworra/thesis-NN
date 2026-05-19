@@ -179,20 +179,16 @@ def test_single_word(rnn, top_k=None, label="rand"):
 
 
 def train_unified_seq2seq(input_size=None, hidden_size=50, max_frames=6, epochs=5000, lr=1e-2, language=main_language):
-    """Train a unified seq2seq model for both perception and production simultaneously.
+    """Train a seq2seq model with perception task (word prediction from utterance).
     
-    The model learns two complementary tasks:
-    1. Perception (encoder): utterance frames -> word label (using prefix targets)
-    2. Production (decoder): word context + teacher-forced frames -> next frame
-    
-    Teacher forcing is used for production: ground-truth frames feed into the network
-    sequentially, allowing the model to learn frame-to-frame dependencies while
-    maintaining stability during training. Both tasks share the same RNN weights.
+    The model learns to predict the word label from utterance frames at each timestep.
+    Uses prefix targets: at timestep t, the target is the distribution of words that
+    could be identified by the prefix heard up to that point.
     
     Args:
         input_size: spectral dimension (defaults to len(erb_bins), usually 30).
         hidden_size: dimension of hidden state.
-        max_frames: maximum number of frames per word.
+        max_frames: maximum number of frames per word (not used currently).
         epochs: number of training iterations.
         lr: learning rate.
         language: language object with vocabulary.
@@ -219,17 +215,7 @@ def train_unified_seq2seq(input_size=None, hidden_size=50, max_frames=6, epochs=
         # Reshape 1D frames to 2D column vectors (input_size, 1)
         inputs = [x.reshape(-1, 1) if x.ndim == 1 else x for x in inputs]
         
-        canonical_frames = canonical_utterance_to_input(word, length=1)
-        # Reshape 1D frames to 2D column vectors (input_size, 1)
-        canonical_frames = [x.reshape(-1, 1) if x.ndim == 1 else x for x in canonical_frames]
-        
-        if len(canonical_frames) > max_frames:
-            canonical_frames = canonical_frames[:max_frames]
-        num_frames = len(canonical_frames)
-        
-        total_loss = 0.0
-        
-        # Task 1: Perception - encode utterance and predict word at each timestep
+        # Task: Perception - encode utterance and predict word at each timestep
         h0 = np.zeros((hidden_size, 1))
         xs_perc, hs_perc, ys_perc, probs_perc = model.forward(inputs, h0)
         targets_perc = [prefix_target_distribution(word, t, language) for t in range(len(inputs))]
@@ -238,33 +224,16 @@ def train_unified_seq2seq(input_size=None, hidden_size=50, max_frames=6, epochs=
         for t in range(len(inputs)):
             perc_loss += -np.sum(targets_perc[t] * np.log(probs_perc[t] + 1e-9))
         
-        # Backprop for perception
+        # Backprop
         model.backward(xs_perc, hs_perc, probs_perc, targets_perc, lr=lr)
         
-        # Task 2: Production - generate frames using teacher forcing
-        # Feed ground-truth frames sequentially: frame_t-1 -> frame_t
-        prod_inputs = canonical_frames[:-1] + [canonical_frames[-1]]
-        targets_prod = canonical_frames
-        
-        h0_prod = np.zeros((hidden_size, 1))
-        xs_prod, hs_prod, ys_prod, probs_prod = model.forward(prod_inputs, h0_prod)
-        
-        prod_loss = 0.0
-        for frame_idx in range(num_frames):
-            prod_loss += -np.sum(targets_prod[frame_idx] * np.log(probs_prod[frame_idx] + 1e-9))
-        
-        # Backprop for production
-        model.backward(xs_prod, hs_prod, probs_prod, targets_prod, lr=lr)
-        
-        total_loss = perc_loss + prod_loss
-        
-        if total_loss < best_loss:
-            best_loss = total_loss
+        if perc_loss < best_loss:
+            best_loss = perc_loss
             best_params = model.get_params()
             best_epoch = epoch
         
         if epoch % 500 == 0:
-            print(f"Unified train epoch {epoch}: perception loss {perc_loss:.4f}, production loss {prod_loss:.4f}, total {total_loss:.4f}")
+            print(f"Unified train epoch {epoch}: loss {perc_loss:.4f}")
     
     model.set_params(best_params)
     return model, best_loss, best_epoch
@@ -298,6 +267,8 @@ def test_perception(model, input_size=None, label=None, top_k=3, language=main_l
         sequence = word.utterance()
     
     inputs = utterance_to_input(sequence)
+    # Reshape 1D frames to 2D column vectors (input_size, 1)
+    inputs = [x.reshape(-1, 1) if x.ndim == 1 else x for x in inputs]
     hidden_size = model.hidden_layer.W_hh.shape[0]
     
     print(f"\n{'='*60}")
@@ -416,12 +387,12 @@ def test_production(model, input_size=None, hidden_size=50, max_frames=6, label=
 
 
 def run_seq2seq_full_suite(hidden_size=50, input_size=None, max_frames=6, train_epochs=5000, test_words=None):
-    """Complete test suite: train unified perception+production model, then test both tasks.
+    """Complete test suite: train perception model and test on word prediction.
     
     Args:
         hidden_size: dimension of hidden state (default 50).
         input_size: spectral dimension (defaults to 30).
-        max_frames: max frames per word for production.
+        max_frames: max frames per word (not used in current implementation).
         train_epochs: number of training epochs.
         test_words: list of word labels to test (default: sample from vocabulary).
     """
@@ -432,36 +403,31 @@ def run_seq2seq_full_suite(hidden_size=50, input_size=None, max_frames=6, train_
         test_words = ["pitaku", "katupa", "pupupu", "tutapa"]
     
     print("\n" + "="*60)
-    print("SEQ2SEQ FULL SUITE (UNIFIED TRAINING)")
+    print("SEQ2SEQ TRAINING SUITE")
     print("="*60)
-    print(f"Config: input_size={input_size}, hidden_size={hidden_size}, max_frames={max_frames}")
+    print(f"Config: input_size={input_size}, hidden_size={hidden_size}")
     
-    # Train unified model
-    print("\n[1/3] Training UNIFIED model (perception + production simultaneously)...")
+    # Train model
+    print("\n[1/2] Training model (perception task: utterance -> word)...")
     model, best_loss, best_epoch = train_unified_seq2seq(
         input_size=input_size, hidden_size=hidden_size, max_frames=max_frames, epochs=train_epochs
     )
-    print(f"✓ Unified training complete. Best loss: {best_loss:.4f} at epoch {best_epoch}")
+    print(f"✓ Training complete. Best loss: {best_loss:.4f} at epoch {best_epoch}")
     
     # Test perception
-    print("\n[2/3] Testing PERCEPTION...")
+    print("\n[2/2] Testing perception (word prediction from utterance)...")
     print("-" * 60)
     perc_correct = 0
     for label in test_words:
-        _, _, pred, _ = test_perception(model, input_size=input_size, label=label, language=main_language)
+        _, _, pred, confidence = test_perception(model, input_size=input_size, label=label, language=main_language)
         if pred == label:
             perc_correct += 1
+        print(f"  {label}: predicted '{pred}' (confidence: {confidence:.4f})")
+    
     print(f"\nPerception accuracy: {perc_correct}/{len(test_words)}")
     
-    # Test production
-    print("\n[3/3] Testing PRODUCTION...")
-    print("-" * 60)
-    for label in test_words:
-        test_production(model, input_size=input_size, hidden_size=hidden_size, 
-                       max_frames=max_frames, label=label, language=main_language)
-    
     print("\n" + "="*60)
-    print("SUITE COMPLETE")
+    print("TRAINING COMPLETE")
     print("="*60)
     
     return model
