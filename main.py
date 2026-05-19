@@ -299,7 +299,7 @@ def test_perception(model, input_size=None, label=None, top_k=3, language=main_l
         print(f"Timestep {t} (prefix='{true_prefix}'):")
         top_indices = np.argsort(probs)[::-1][:top_k]
         for i, idx in enumerate(top_indices, 1):
-            marker = "→" if language.word_labels[idx] == label else " "
+            marker = "->" if language.word_labels[idx] == label else " "
             print(f"  {i}. {marker} {language.word_labels[idx]}: {probs[idx]:.4f}")
         print()
     
@@ -307,7 +307,7 @@ def test_perception(model, input_size=None, label=None, top_k=3, language=main_l
     final_pred = language.word_labels[np.argmax(final_probs)]
     final_confidence = final_probs[np.argmax(final_probs)]
     
-    print(f"Result: {'✓ CORRECT' if final_pred == label else '✗ INCORRECT'}")
+    print(f"Result: {'CORRECT' if final_pred == label else 'INCORRECT'}")
     print(f"Final prediction: {final_pred} (confidence: {final_confidence:.4f})")
     
     return sequence, word, final_pred, final_confidence
@@ -412,7 +412,7 @@ def run_seq2seq_full_suite(hidden_size=50, input_size=None, max_frames=6, train_
     model, best_loss, best_epoch = train_unified_seq2seq(
         input_size=input_size, hidden_size=hidden_size, max_frames=max_frames, epochs=train_epochs
     )
-    print(f"✓ Training complete. Best loss: {best_loss:.4f} at epoch {best_epoch}")
+    print(f"Training complete. Best loss: {best_loss:.4f} at epoch {best_epoch}")
     
     # Test perception
     print("\n[2/2] Testing perception (word prediction from utterance)...")
