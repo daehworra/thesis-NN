@@ -52,6 +52,21 @@ def onehot(label, language=main_language):
     return vec
 
 
+def canonical_utterance_to_frames(word, length=1):
+    """Turn a word into its canonical phoneme-by-phoneme formant tuples."""
+    sequence = []
+    phonseq = word.phonseq
+    for i in range(len(phonseq)):
+        phon = phonseq[i]
+        if phon in consonants:
+            next_vowel = phonseq[i + 1]
+            f1 = consonants[phon].bursts[next_vowel]
+            sequence += [(f1, 0)] * length
+        else:
+            sequence += [(vowels[phon].F1, vowels[phon].F2)] * length
+    return sequence
+
+
 def prefix_target_distribution(word, step, language=main_language):
     """Build a prefix-aware target distribution for a given timestep.
 
@@ -239,6 +254,49 @@ def train_unified_seq2seq(input_size=None, hidden_size=50, max_frames=6, epochs=
     return model, best_loss, best_epoch
 
 
+def train_production_seq2seq(encoder_model, input_size=None, hidden_size=50, max_frames=6, epochs=5000, lr=1e-2, language=main_language):
+    """Train a seq2seq decoder to generate spectral frames from encoded state."""
+    if input_size is None:
+        input_size = len(erb_bins)
+
+    output_size = len(erb_bins)
+    decoder = Seq2Seq(input_size=input_size, hidden_size=hidden_size, output_size=output_size)
+
+    best_loss = np.inf
+    best_params = decoder.get_params()
+    best_epoch = -1
+
+    for epoch in range(epochs):
+        sequence, word = language.random_utterance(length=1)
+        inputs = utterance_to_input(sequence)
+        inputs = [x.reshape(-1, 1) if x.ndim == 1 else x for x in inputs]
+        num_frames = min(len(inputs), max_frames)
+
+        context = encoder_model.encode(inputs)
+
+        start_token = np.zeros((input_size, 1))
+        decoder_inputs = [start_token] + inputs[: num_frames - 1]
+        targets = inputs[:num_frames]
+
+        xs, hs, ys, _ = decoder.forward(decoder_inputs, context)
+        loss = 0.0
+        for t in range(num_frames):
+            loss += np.sum((ys[t] - targets[t]) ** 2)
+
+        decoder.backward_mse(xs, hs, ys, targets, lr=lr)
+
+        if loss < best_loss:
+            best_loss = loss
+            best_params = decoder.get_params()
+            best_epoch = epoch
+
+        if epoch % 500 == 0:
+            print(f"Production train epoch {epoch}: loss {loss:.4f}")
+
+    decoder.set_params(best_params)
+    return decoder, best_loss, best_epoch
+
+
 def test_perception(model, input_size=None, label=None, top_k=3, language=main_language):
     """Test perception: progressively encode utterance and predict word at each timestep.
     
@@ -313,77 +371,42 @@ def test_perception(model, input_size=None, label=None, top_k=3, language=main_l
     return sequence, word, final_pred, final_confidence
 
 
-def test_production(model, input_size=None, hidden_size=50, max_frames=6, label=None, language=main_language):
-    """Test production: generate utterance frames from word label + position.
-    
-    Generates frames sequentially, where each frame is conditioned on both the
-    word label and the frame position. This allows the model to generate
-    context-dependent consonant frames.
-    
-    Args:
-        model: trained Seq2Seq production model.
-        input_size: spectral dimension (defaults to len(erb_bins)).
-        hidden_size: dimension of hidden state.
-        max_frames: maximum frames (must match training).
-        label: word label to produce (None for random).
-        language: language object.
-    
-    Returns:
-        (word, generated_frames, ground_truth_frames)
-    """
-    if input_size is None:
-        input_size = len(erb_bins)
-    
+def test_production(encoder_model, decoder_model, max_frames=6, label=None, language=main_language):
+    """Test production by generating spectral frames from encoded utterance state."""
     if label is None:
-        _, word = language.random_utterance(length=1)
+        sequence, word = language.random_utterance(length=1)
         label = word.phonseq
     else:
         word_idx = language.word_labels.index(label)
         word = language.words[word_idx]
-    
-    # One-hot word label
-    word_vec = onehot(label, language)
-    
-    generated_frames = []
-    h = np.zeros((hidden_size, 1))
-    
-    # Use the full canonical target length (or cap to max_frames)
-    target_inputs = canonical_utterance_to_input(word, length=1)
-    num_frames = min(len(target_inputs), max_frames)
-    
-    # Generate frame-by-frame using independent position-conditioned prediction
-    for frame_idx in range(num_frames):
-        position_vec = np.zeros((max_frames, 1))
-        position_vec[frame_idx] = 1.0
-        
-        combined_input = np.vstack([word_vec, position_vec])
-        xs, hs, ys, probs = model.forward([combined_input], np.zeros((hidden_size, 1)))
-        generated_frames.append(probs[0].flatten())
-    
-    generated_frames = np.array(generated_frames)
-    
-    # Ground truth
-    truth_inputs = target_inputs
-    truth_frames = np.vstack([f.flatten() for f in truth_inputs[:num_frames]])
+        sequence = word.utterance()
+
+    inputs = utterance_to_input(sequence)
+    inputs = [x.reshape(-1, 1) if x.ndim == 1 else x for x in inputs]
+    num_frames = min(len(inputs), max_frames)
+
+    context = encoder_model.encode(inputs)
+    produced_frames = []
+    x = np.zeros((len(erb_bins), 1))
+    h = context
+
+    for t in range(num_frames):
+        _, _, ys, _ = decoder_model.forward([x], h)
+        y = ys[0]
+        produced_frames.append(y.flatten())
+        h = decoder_model.hidden_layer.forward(decoder_model.input_layer.forward(y), h)
+        x = y
 
     print(f"\n{'='*60}")
     print(f"PRODUCTION TEST: {label}")
     print(f"{'='*60}")
-    print(f"Ground truth canonical frames: {num_frames}")
-    print(f"Generated frames: {generated_frames.shape[0]}")
-    print(f"\nGenerated frame peaks:")
-    for i in range(len(generated_frames)):
-        gen_peak = np.argmax(generated_frames[i])
-        gen_erb = erb_bins[gen_peak] if gen_peak < len(erb_bins) else 0
-        print(f"  Frame {i}: peak at ERB {gen_erb:.2f}")
-    
-    print(f"\nGround truth frame peaks:")
-    for i in range(len(truth_frames)):
-        truth_peak = np.argmax(truth_frames[i])
-        truth_erb = erb_bins[truth_peak] if truth_peak < len(erb_bins) else 0
-        print(f"  Frame {i}: peak at ERB {truth_erb:.2f}")
-    
-    return word, generated_frames, truth_frames
+    print(f"Generated spectral frames: {len(produced_frames)}")
+
+    for t, frame in enumerate(produced_frames):
+        phon = word.phonseq[t]
+        print(f"Frame {t} ({phon}): [{', '.join(f'{v:.3f}' for v in frame[:5])} ...]")
+
+    return word, produced_frames
 
 
 def run_seq2seq_full_suite(hidden_size=50, input_size=None, max_frames=6, train_epochs=5000, test_words=None):
@@ -408,14 +431,14 @@ def run_seq2seq_full_suite(hidden_size=50, input_size=None, max_frames=6, train_
     print(f"Config: input_size={input_size}, hidden_size={hidden_size}")
     
     # Train model
-    print("\n[1/2] Training model (perception task: utterance -> word)...")
+    print("\n[1/3] Training model (perception task: utterance -> word)...")
     model, best_loss, best_epoch = train_unified_seq2seq(
         input_size=input_size, hidden_size=hidden_size, max_frames=max_frames, epochs=train_epochs
     )
     print(f"Training complete. Best loss: {best_loss:.4f} at epoch {best_epoch}")
     
     # Test perception
-    print("\n[2/2] Testing perception (word prediction from utterance)...")
+    print("\n[2/3] Testing perception (word prediction from utterance)...")
     print("-" * 60)
     perc_correct = 0
     for label in test_words:
@@ -425,6 +448,21 @@ def run_seq2seq_full_suite(hidden_size=50, input_size=None, max_frames=6, train_
         print(f"  {label}: predicted '{pred}' (confidence: {confidence:.4f})")
     
     print(f"\nPerception accuracy: {perc_correct}/{len(test_words)}")
+
+    # Train production decoder
+    print("\n[3/4] Training production decoder (encoded utterance -> spectral frames)...")
+    print("-" * 60)
+    decoder_model, prod_loss, prod_epoch = train_production_seq2seq(
+        encoder_model=model, input_size=None, hidden_size=hidden_size, max_frames=max_frames, epochs=train_epochs, lr=1e-2, language=main_language
+    )
+    print(f"Production training complete. Best loss: {prod_loss:.4f} at epoch {prod_epoch}")
+
+    # Test production
+    print("\n[4/4] Testing production (frame-by-frame model generation)...")
+    print("-" * 60)
+    for label in test_words:
+        _, produced_frames = test_production(model, decoder_model, max_frames=max_frames, label=label, language=main_language)
+        print(f"  {label}: produced {len(produced_frames)} frames")
     
     print("\n" + "="*60)
     print("TRAINING COMPLETE")
