@@ -54,16 +54,18 @@ class OutputLayer:
         return np.dot(self.W, h) + self.b
      
 class RNN:
-    """A simple recurrent neural network for sequence classification.
+    """A simple recurrent neural network with perception and production heads.
 
-    This implementation uses a separate input projection, recurrent hidden
-    layer, and output layer, with tanh activation in the hidden state.
+    The perception head classifies each timestep into vocabulary labels.
+    The production head maps the final hidden state into a 30-dimensional
+    utterance vector representation.
     """
 
     def __init__(self, input_size, hidden_size, output_size):
         self.input_layer = InputLayer(input_size, hidden_size)
         self.hidden_layer = HiddenLayer(hidden_size)
         self.output_layer = OutputLayer(hidden_size, output_size)
+        self.production_layer = OutputLayer(hidden_size, input_size)
         self.hidden_size = hidden_size
 
     def softmax(self, x):
@@ -71,6 +73,10 @@ class RNN:
         x = x - np.max(x)
         exp = np.exp(x)
         return exp / np.sum(exp, keepdims=True)
+
+    def production_output(self, h):
+        """Compute the 30-dimensional production vector from the final hidden state."""
+        return self.production_layer.forward(h)
 
     def forward(self, inputs, h_prev):
         """Run the network forward over a sequence of inputs.
@@ -101,15 +107,32 @@ class RNN:
 
         return xs, hs, ys, probs_dict
 
-    def backward(self, xs, hs, probs, targets, lr=1e-3):
+    def backward(
+        self,
+        xs,
+        hs,
+        probs,
+        targets=None,
+        lr=1e-3,
+        production_target=None,
+        production_targets=None,
+        production_loss_weight=1.0,
+        freeze_perception=False,
+        freeze_production=False,
+    ):
         """Backpropagate through time and update model parameters.
 
         Args:
             xs: dictionary of inputs for each timestep.
             hs: dictionary of hidden states for each timestep.
             probs: dictionary of predicted softmax probabilities.
-            targets: list of target distributions for each timestep.
+            targets: list of target distributions for each timestep, or None to skip perception updates.
             lr: learning rate.
+            production_target: optional 30-dimensional production target for the final state (deprecated).
+            production_targets: list of 30-dimensional targets for each timestep, one per phoneme.
+            production_loss_weight: scale factor for production gradients.
+            freeze_perception: when True, do not update perception parameters.
+            freeze_production: when True, do not update the production head.
         """
         dWxh = np.zeros_like(self.input_layer.W)
         dbx = np.zeros_like(self.input_layer.b)
@@ -120,17 +143,43 @@ class RNN:
         dWhy = np.zeros_like(self.output_layer.W)
         dby = np.zeros_like(self.output_layer.b)
 
+        dWprod = np.zeros_like(self.production_layer.W)
+        dby_prod = np.zeros_like(self.production_layer.b)
+
         dh_next = np.zeros((self.hidden_size, 1))
+        
+        # Pre-compute production gradients for all timesteps if provided
+        prod_grads = {}
+        if production_targets is not None:
+            for t in range(len(xs)):
+                y_prod = self.production_layer.forward(hs[t])
+                dprod = 2 * (y_prod - production_targets[t]) / production_targets[t].size
+                dprod *= production_loss_weight
+                prod_grads[t] = dprod
+        elif production_target is not None:
+            y_prod = self.production_layer.forward(hs[len(xs) - 1])
+            dprod = 2 * (y_prod - production_target) / production_target.size
+            dprod *= production_loss_weight
+            prod_grads[len(xs) - 1] = dprod
 
         for t in reversed(range(len(xs))):
-            # cross-entropy derivative through softmax output
-            dy = probs[t] - targets[t]
+            dh = np.zeros((self.hidden_size, 1))
+            
+            if targets is not None:
+                dy = probs[t] - targets[t]
+                dWhy += np.dot(dy, hs[t].T)
+                dby += dy
+                dh += np.dot(self.output_layer.W.T, dy) + dh_next
+            else:
+                dh = dh_next.copy()
 
-            dWhy += np.dot(dy, hs[t].T)
-            dby += dy
+            # Add production gradient if available for this timestep
+            if t in prod_grads:
+                dprod = prod_grads[t]
+                dWprod += np.dot(dprod, hs[t].T)
+                dby_prod += dprod
+                dh += np.dot(self.production_layer.W.T, dprod)
 
-            # backprop into hidden state through output layer
-            dh = np.dot(self.output_layer.W.T, dy) + dh_next
             dh_raw = (1 - hs[t] ** 2) * dh
 
             dbh += dh_raw
@@ -141,15 +190,20 @@ class RNN:
             dh_next = np.dot(self.hidden_layer.W_hh.T, dh_raw)
 
         # Clip gradients to stabilize training
-        for d in [dWxh, dWhh, dWhy, dbh, dby, dbx]:
+        for d in [dWxh, dWhh, dWhy, dby, dby_prod, dbh, dbx]:
             np.clip(d, -5, 5, out=d)
 
-        self.input_layer.W -= lr * dWxh
-        self.input_layer.b -= lr * dbx
-        self.hidden_layer.W_hh -= lr * dWhh
-        self.hidden_layer.b_h -= lr * dbh
-        self.output_layer.W -= lr * dWhy
-        self.output_layer.b -= lr * dby
+        if not freeze_perception:
+            self.input_layer.W -= lr * dWxh
+            self.input_layer.b -= lr * dbx
+            self.hidden_layer.W_hh -= lr * dWhh
+            self.hidden_layer.b_h -= lr * dbh
+            self.output_layer.W -= lr * dWhy
+            self.output_layer.b -= lr * dby
+
+        if not freeze_production and (production_target is not None or production_targets is not None):
+            self.production_layer.W -= lr * dWprod
+            self.production_layer.b -= lr * dby_prod
 
     def get_params(self):
         """Return a copy of the model parameters."""
@@ -160,6 +214,8 @@ class RNN:
             "bh": self.hidden_layer.b_h.copy(),
             "Why": self.output_layer.W.copy(),
             "by": self.output_layer.b.copy(),
+            "Wprod": self.production_layer.W.copy(),
+            "bprod": self.production_layer.b.copy(),
         }
 
     def set_params(self, params):
@@ -170,6 +226,8 @@ class RNN:
         self.hidden_layer.b_h = params["bh"].copy()
         self.output_layer.W = params["Why"].copy()
         self.output_layer.b = params["by"].copy()
+        self.production_layer.W = params["Wprod"].copy()
+        self.production_layer.b = params["bprod"].copy()
 
     def predict(self, inputs, h_prev=None):
         """Return softmax probabilities for a sequence without updating weights."""

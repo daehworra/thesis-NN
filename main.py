@@ -65,57 +65,128 @@ def prefix_target_distribution(word, step, language=main_language):
     return vec
 
 
-def train_model(epochs=10000, lr=1e-2):
-    """Train an RNN and return the best model found during training.
+def production_target_vector(inputs):
+    """Build a 30-dimensional target vector for the utterance.
 
-    The best model is selected by the lowest loss observed on the training
-    examples during the run.
-
-    Args:
-        epochs: number of training iterations.
-        lr: learning rate for parameter updates.
-
-    Returns:
-        best_rnn: RNN instance with parameters from the best observed loss.
-        best_loss: lowest loss value observed.
-        best_epoch: epoch index where the best loss occurred.
+    This returns the average spectral vector of the entire input sequence.
+    The production head learns to predict this utterance-level representation
+    from the final perceptual hidden state.
     """
-    rnn = RNN(input_size=len(erb_bins), hidden_size=50, output_size=len(main_language.word_labels))
+    return np.mean(np.hstack(inputs), axis=1, keepdims=True)
+
+
+def train_perception(rnn, epochs=10000, lr=1e-2, print_every=100):
+    """Train only the perception head and shared recurrent state."""
     best_loss = np.inf
     best_params = rnn.get_params()
     best_epoch = -1
 
     for epoch in range(epochs):
-        # 1. sample a random word and use its matching utterance
         sequence, word = main_language.random_utterance(length=1)
         inputs = utterance_to_input(sequence)
         targets = [prefix_target_distribution(word, t) for t in range(len(inputs))]
 
-        # 2. forward pass
-        h0 = np.zeros((50, 1))
+        h0 = np.zeros((rnn.hidden_size, 1))
         xs, hs, ys, probs = rnn.forward(inputs, h0)
 
-        # 3. compute loss using softmax probabilities
         loss = 0
         for t in range(len(probs)):
             loss += -np.sum(targets[t] * np.log(probs[t] + 1e-9))
 
-        # 4. backward pass and parameter update
-        rnn.backward(xs, hs, probs, targets, lr=lr)
+        rnn.backward(
+            xs,
+            hs,
+            probs,
+            targets,
+            lr=lr,
+            production_target=None,
+            freeze_production=True,
+        )
 
         if loss < best_loss:
             best_loss = loss
             best_params = rnn.get_params()
             best_epoch = epoch
 
-        if epoch % 100 == 0:
-            print(epoch, loss)
+        if epoch % print_every == 0:
+            print("perception", epoch, loss)
 
-    print("best loss:", best_loss, "at epoch", best_epoch)
+    rnn.set_params(best_params)
+    print("best perception loss:", best_loss, "at epoch", best_epoch)
+    return rnn, best_loss, best_epoch
 
-    best_rnn = RNN(input_size=len(erb_bins), hidden_size=50, output_size=len(main_language.word_labels))
-    best_rnn.set_params(best_params)
-    return best_rnn, best_loss, best_epoch
+
+def train_production(rnn, epochs=2000, lr=1e-2, freeze_perception=True, print_every=100):
+    """Train the production head to predict each phoneme's spectral vector at each timestep.
+
+    For the CORRECT word, we draw an actual utterance and convert it to 30-dimensional vectors.
+    The target at each timestep is the actual spectral vector for that phoneme.
+    freeze_perception=True keeps the recurrent representation fixed.
+    """
+    best_loss = np.inf
+    best_params = rnn.get_params()
+    best_epoch = -1
+
+    for epoch in range(epochs):
+        sequence, word = main_language.random_utterance(length=1)
+        inputs = utterance_to_input(sequence)
+        h0 = np.zeros((rnn.hidden_size, 1))
+        xs, hs, ys, probs = rnn.forward(inputs, h0)
+
+        # Create production targets: one for each timestep (the actual input at that timestep)
+        production_targets = inputs  # List of 30-dimensional vectors, one per timestep
+
+        loss = 0
+        for t in range(len(inputs)):
+            prod_output = rnn.production_output(hs[t])
+            loss += np.mean((prod_output - inputs[t]) ** 2)
+
+        rnn.backward(
+            xs,
+            hs,
+            probs,
+            targets=None,
+            lr=lr,
+            production_targets=production_targets,
+            production_loss_weight=1.0,
+            freeze_perception=freeze_perception,
+            freeze_production=False,
+        )
+
+        if loss < best_loss:
+            best_loss = loss
+            best_params = rnn.get_params()
+            best_epoch = epoch
+
+        if epoch % print_every == 0:
+            print("production", epoch, loss)
+
+    rnn.set_params(best_params)
+    print("best production loss:", best_loss, "at epoch", best_epoch)
+    return rnn, best_loss, best_epoch
+
+
+def train_model(
+    perception_epochs=10000,
+    production_epochs=10000,
+    lr=1e-2,
+):
+    """Train perception first, then train the production head from the final state."""
+    rnn = RNN(
+        input_size=len(erb_bins),
+        hidden_size=50,
+        output_size=len(main_language.word_labels),
+    )
+
+    rnn, perception_loss, perception_epoch = train_perception(
+        rnn, epochs=perception_epochs, lr=lr
+    )
+
+    rnn, production_loss, production_epoch = train_production(
+        rnn, epochs=production_epochs, lr=lr, freeze_perception=True
+    )
+
+    return rnn, perception_loss, perception_epoch, production_loss, production_epoch
 
 
 def test_single_random_word(rnn, top_k=None):
@@ -129,10 +200,13 @@ def test_single_random_word(rnn, top_k=None):
         sequence: the input utterance as a list of formant tuples.
         word: the Word object selected for testing.
         probs: dictionary of softmax probabilities at each timestep.
+        production_outputs: list of 30-dimensional vectors produced by the production head.
+        production_targets: list of 30-dimensional target vectors (actual inputs).
     """
     sequence, word = main_language.random_utterance(length=1)
     inputs = utterance_to_input(sequence)
-    probs = rnn.predict(inputs)
+    h0 = np.zeros((rnn.hidden_size, 1))
+    xs, hs, ys, probs = rnn.forward(inputs, h0)
 
     print(f"Testing random word: {word.phonseq}")
     print(f"Utterance sequence: {sequence}")
@@ -151,9 +225,62 @@ def test_single_random_word(rnn, top_k=None):
                 print(f"  {main_language.word_labels[i]}: {prob[i]:.4f}")
         print()
 
-    return sequence, word, probs
+    production_outputs = [rnn.production_output(hs[t]).flatten() for t in range(len(inputs))]
+    production_targets = [inp.flatten() for inp in inputs]
+
+    print("Production head outputs (one per timestep):")
+    for t in range(len(production_outputs)):
+        print(f"Timestep {t}:")
+        print(np.array2string(production_outputs[t], precision=4, separator=', '))
+    print()
+
+    print("Production target vectors (actual spectral inputs):")
+    for t in range(len(production_targets)):
+        print(f"Timestep {t}:")
+        print(np.array2string(production_targets[t], precision=4, separator=', '))
+    print()
+
+    return sequence, word, probs, production_outputs, production_targets
+
+
+def test_production_for_word(rnn, word_label=None):
+    """Display the production head output for one chosen vocabulary word, timestep by timestep."""
+    if word_label is None:
+        sequence, word = main_language.random_utterance(length=1)
+    else:
+        try:
+            word = next(w for w in main_language.words if w.phonseq == word_label)
+        except StopIteration:
+            raise ValueError(f"Unknown word label: {word_label}")
+        sequence = word.utterance(length=1)
+
+    inputs = utterance_to_input(sequence)
+    h0 = np.zeros((rnn.hidden_size, 1))
+    _, hs, _, _ = rnn.forward(inputs, h0)
+    
+    production_outputs = [rnn.production_output(hs[t]).flatten() for t in range(len(inputs))]
+    production_targets = [inp.flatten() for inp in inputs]
+
+    print(f"Production output for word: {word.phonseq}")
+    print(f"Utterance sequence: {sequence}")
+    print()
+    
+    print("Production head outputs (one per timestep):")
+    for t in range(len(production_outputs)):
+        print(f"Timestep {t}:")
+        print(np.array2string(production_outputs[t], precision=4, separator=', '))
+    print()
+
+    print("Production target vectors (actual spectral inputs):")
+    for t in range(len(production_targets)):
+        print(f"Timestep {t}:")
+        print(np.array2string(production_targets[t], precision=4, separator=', '))
+    print()
+
+    return word, production_outputs, production_targets
 
 
 if __name__ == "__main__":
-    best_rnn, best_loss, best_epoch = train_model()
-    test_single_random_word(best_rnn)
+    best_rnn, best_loss, best_epoch, best_prod_loss, best_prod_epoch = train_model()
+    test_single_random_word(best_rnn, top_k=3)
+    test_production_for_word(best_rnn, word_label="pupupu")
