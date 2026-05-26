@@ -261,7 +261,7 @@ def train_production(
 
             target = inputs[t]
 
-            recon_loss += np.mean(
+            recon_loss += np.sum(
                 (output - target) ** 2
             )
 
