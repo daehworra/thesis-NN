@@ -181,7 +181,6 @@ class RNN:
         seq_length,
         teacher_forcing_inputs=None,
         teacher_forcing_ratio=1.0,
-        generation_noise=0.01,
     ):
         """
         Shared-state autoregressive generation.
@@ -227,12 +226,6 @@ class RNN:
             else:
 
                 feedback = output.copy()
-
-                # Prevent exact fixed-point collapse
-                feedback += (
-                    np.random.randn(*feedback.shape)
-                    * generation_noise
-                )
 
             # ====================================================
             # Shared recurrent dynamics

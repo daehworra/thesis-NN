@@ -246,7 +246,6 @@ def train_production(
             len(inputs),
             teacher_forcing_inputs=inputs,
             teacher_forcing_ratio=teacher_forcing_ratio,
-            generation_noise=0.01,
         )
 
         # ====================================================
@@ -473,7 +472,6 @@ def test_single_random_word(
         final_h,
         len(inputs),
         teacher_forcing_inputs=None,
-        generation_noise=0.01,
     )
 
     print_production_comparison(
@@ -532,7 +530,6 @@ def test_production_for_word(
         final_h,
         len(inputs),
         teacher_forcing_inputs=None,
-        generation_noise=0.01,
     )
 
     print("\n==============================")
