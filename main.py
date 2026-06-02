@@ -253,7 +253,7 @@ def train_production(
         # Reconstruction loss
         # ====================================================
 
-        recon_loss = 0.0
+        loss = 0.0
 
         for t in range(len(inputs)):
 
@@ -261,20 +261,9 @@ def train_production(
 
             target = inputs[t]
 
-            recon_loss += np.sum(
+            loss += np.sum(
                 (output - target) ** 2
             )
-
-        # ====================================================
-        # Anti-collapse temporal penalty
-        # ====================================================
-
-        temporal_penalty = temporal_difference_penalty(
-            productions
-        )
-
-        # Small regularization weight
-        loss = recon_loss + 0.05 * temporal_penalty
 
         # ====================================================
         # Backpropagation
@@ -318,8 +307,7 @@ def train_production(
                 f"[PRODUCTION] "
                 f"epoch={epoch} "
                 f"loss={loss:.6f} "
-                f"recon={recon_loss:.6f} "
-                f"temp={temporal_penalty:.6f} "
+                f"recon={loss:.6f} "
                 f"tf={teacher_forcing_ratio:.3f} "
                 f"var={output_variance:.6f} "
                 f"delta={timestep_difference:.6f}"
@@ -343,7 +331,7 @@ def train_production(
 def train_model(
     perception_epochs=10000,
     production_epochs=10000,
-    lr=1e-3,
+    lr=1e-2,
 ):
     """
     Train full shared-state model.
@@ -530,7 +518,7 @@ def test_production_for_word(
                 f"Unknown word label: {word_label}"
             )
 
-        sequence = word.utterance(length=1)
+        sequence = word.perfect(length=1)
 
     inputs = utterance_to_input(sequence)
 
@@ -571,11 +559,11 @@ if __name__ == "__main__":
         best_epoch,
         best_prod_loss,
         best_prod_epoch,
-    ) = train_model()
+    ) = train_model(production_epochs=15000)
 
     test_single_random_word(
         best_rnn,
-        top_k=3,
+        top_k=12,
     )
 
     test_production_for_word(

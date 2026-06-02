@@ -21,6 +21,9 @@ class Vowel:
         rand_F2 = norm.rvs(loc=self.F2, scale=1, size=length)
 
         return [(rand_F1[i], rand_F2[i]) for i in range(length)]
+    
+    def perfect(self, length=1):
+        return [(self.F1, self.F2) for i in range(length)]
 
 
 class Consonant:
@@ -37,6 +40,9 @@ class Consonant:
         """Generate a consonant utterance conditioned on a following vowel."""
         F1_list = norm.rvs(loc=self.bursts[vowel], scale=1.5, size=length)
         return [(F1, 0) for F1 in F1_list]
+    
+    def perfect(self, vowel, length=1):
+        return [(self.bursts[vowel], 0) for _ in range(length)]
 
 
 # Tone and vowel classes used by the artificial language.
@@ -79,6 +85,20 @@ class Word:
                 sequence += consonants[phon].utter(phonseq[i + 1], length)
             else:
                 sequence += vowels[phon].utter(length)
+
+        return sequence
+    
+    def perfect(self, length=1):
+        sequence = []
+        phonseq = self.phonseq
+        
+        for i in range(len(phonseq)):
+            phon = phonseq[i]
+
+            if phon in consonants:
+                sequence += consonants[phon].perfect(phonseq[i + 1], length)
+            else:
+                sequence += vowels[phon].perfect(length)
 
         return sequence
 
