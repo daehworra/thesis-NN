@@ -1,7 +1,7 @@
 """Training and evaluation utilities for the shared-state RNN."""
 
 import numpy as np
-
+import math
 from network import RNN
 from languages import main_language
 import matplotlib.pyplot as plt
@@ -504,27 +504,14 @@ def test_production_for_word(
     """
 
     if word_label is None:
-
-        sequence, word = main_language.random_utterance(length=LENGTH)
-
+        sequence, word = main_language.random_utterance(LENGTH)
     else:
+        word_idx = main_language.word_labels.index(word_label)
+        word = main_language.words[word_idx]
+        sequence = word.utterance(LENGTH)
 
-        try:
-
-            word = next(
-                w
-                for w in main_language.words
-                if w.phonseq == word_label
-            )
-
-        except StopIteration:
-
-            raise ValueError(
-                f"Unknown word label: {word_label}"
-            )
-
-        sequence = word.perfect(length=LENGTH)
-
+    perfect_sequence = word.perfect(LENGTH)
+    perfect_inputs =utterance_to_input(perfect_sequence)
     inputs = utterance_to_input(sequence)
 
     h0 = np.zeros((rnn.hidden_size, 1))
@@ -545,10 +532,10 @@ def test_production_for_word(
 
     print_production_comparison(
         productions,
-        inputs,
+        perfect_inputs,
     )
 
-    return word, productions, inputs
+    return word, productions, inputs, perfect_inputs
 
 def test_all_word_perc(rnn):
     """Test perception on every word in the vocabulary.
@@ -591,9 +578,11 @@ def test_all_word_prod(rnn):
 
     for word in main_language.words:
 
-        sequence = word.perfect(LENGTH)
+        sequence = word.utterance(LENGTH)
+        perfect_sequence = word.perfect(LENGTH)
 
         inputs = utterance_to_input(sequence)
+        perfect_inputs = utterance_to_input(perfect_sequence)
 
         h0 = np.zeros((rnn.hidden_size, 1))
 
@@ -608,7 +597,7 @@ def test_all_word_prod(rnn):
         )
 
         word_mse = np.mean([
-            np.mean((productions[t] - inputs[t]) ** 2)
+            np.mean((productions[t] - perfect_inputs[t]) ** 2)
             for t in range(len(inputs))
         ])
 
@@ -760,6 +749,88 @@ def epoch_testing_prod(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
         pass
 
     return all_results
+
+def plot_vector_comparison(production, perfect_input,
+                           production_label="Produced",
+                           perfect_label="Ideal"):
+    """
+    Plot corresponding vectors from production and perfect_input.
+
+    Parameters
+    ----------
+    production : list of array-like
+        List of produced vectors.
+    perfect_input : list of array-like
+        List of ideal vectors.
+    production_label : str
+        Label for produced vectors.
+    perfect_label : str
+        Label for ideal vectors.
+    """
+
+    if len(production) != len(perfect_input):
+        raise ValueError(
+            f"Length mismatch: {len(production)} produced vectors "
+            f"and {len(perfect_input)} ideal vectors."
+        )
+
+    n_vectors = len(production)
+
+    # Create a roughly square grid
+    ncols = math.ceil(math.sqrt(n_vectors))
+    nrows = math.ceil(n_vectors / ncols)
+
+    fig, axes = plt.subplots(
+        nrows,
+        ncols,
+        figsize=(4 * ncols, 3 * nrows),
+        squeeze=False
+    )
+
+    axes = axes.flatten()
+
+    for i, (prod_vec, ideal_vec) in enumerate(zip(production, perfect_input)):
+        prod_vec = np.asarray(prod_vec)
+        ideal_vec = np.asarray(ideal_vec)
+
+        if len(prod_vec) != len(ideal_vec):
+            raise ValueError(
+                f"Vector {i} has mismatched dimensions "
+                f"({len(prod_vec)} vs {len(ideal_vec)})."
+            )
+
+        x = np.arange(len(prod_vec))
+
+        axes[i].plot(
+            x,
+            ideal_vec,
+            label=perfect_label,
+            linewidth=2
+        )
+
+        axes[i].plot(
+            x,
+            prod_vec,
+            '--',
+            label=production_label,
+            linewidth=2
+        )
+
+        axes[i].set_title(f"Utterance {i+1}")
+        axes[i].set_xlabel("Feature")
+        axes[i].set_ylabel("Value")
+        axes[i].grid(True, alpha=0.3)
+        axes[i].legend()
+
+    # Hide unused axes
+    for ax in axes[n_vectors:]:
+        ax.set_visible(False)
+
+    fig.suptitle("Produced vs Ideal Vectors", fontsize=16)
+    fig.tight_layout()
+
+    return fig, axes
+
 # ============================================================
 # Main
 # ============================================================
@@ -770,15 +841,15 @@ if __name__ == "__main__":
 
     # epoch_testing_perc()
 
-    epoch_testing_prod()
+    #epoch_testing_prod()
 
-    # (
-    #     best_rnn,
-    #     best_loss,
-    #     best_epoch,
-    #     best_prod_loss,
-    #     best_prod_epoch,
-    # ) = train_model(perception_epochs=10000, production_epochs=0)
+    (
+        best_rnn,
+        best_loss,
+        best_epoch,
+        best_prod_loss,
+        best_prod_epoch,
+    ) = train_model(perception_epochs=10000, production_epochs=10000)
 
     # test_single_word(
     #     best_rnn,
@@ -787,7 +858,10 @@ if __name__ == "__main__":
     # )
 
 
-    # test_production_for_word(
-    #     best_rnn,
-    #     word_label="pupupu",
-    # )
+    _, production, _, perfect_input = test_production_for_word(
+        best_rnn,
+        word_label="katupa",
+    )
+
+    plot_vector_comparison(production, perfect_input)
+    plt.show()
