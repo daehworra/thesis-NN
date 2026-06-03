@@ -142,7 +142,7 @@ def train_perception(
 
     for epoch in range(epochs):
 
-        sequence, word = main_language.random_utterance(length=1)
+        sequence, word = main_language.random_utterance(length=LENGTH)
 
         inputs = utterance_to_input(sequence)
 
@@ -225,7 +225,7 @@ def train_production(
 
     for epoch in range(epochs):
 
-        sequence, word = main_language.random_utterance(length=1)
+        sequence, word = main_language.random_utterance(length=LENGTH)
 
         inputs = utterance_to_input(sequence)
 
@@ -424,7 +424,7 @@ def test_single_random_word(
     Evaluate perception + production on a random word.
     """
 
-    sequence, word = main_language.random_utterance(length=1)
+    sequence, word = main_language.random_utterance(length=LENGTH)
 
     inputs = utterance_to_input(sequence)
 
@@ -498,7 +498,7 @@ def test_production_for_word(
 
     if word_label is None:
 
-        sequence, word = main_language.random_utterance(length=1)
+        sequence, word = main_language.random_utterance(length=LENGTH)
 
     else:
 
@@ -516,7 +516,7 @@ def test_production_for_word(
                 f"Unknown word label: {word_label}"
             )
 
-        sequence = word.perfect(length=1)
+        sequence = word.perfect(length=LENGTH)
 
     inputs = utterance_to_input(sequence)
 
@@ -549,14 +549,14 @@ def test_production_for_word(
 # ============================================================
 
 if __name__ == "__main__":
-
+    LENGTH=3
     (
         best_rnn,
         best_loss,
         best_epoch,
         best_prod_loss,
         best_prod_epoch,
-    ) = train_model(production_epochs=15000)
+    ) = train_model(perception_epochs=30000, production_epochs=30000)
 
     test_single_random_word(
         best_rnn,
