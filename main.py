@@ -237,10 +237,7 @@ def train_production(
         final_h = hs[len(inputs) - 1]
 
         # Gradually reduce teacher forcing
-        teacher_forcing_ratio = max(
-            0.2,
-            1.0 - (epoch / epochs)
-        )
+        teacher_forcing_ratio =  1.0 - (epoch / epochs)
 
         productions, _ = rnn.generate_production_sequence(
             final_h,
@@ -849,7 +846,7 @@ if __name__ == "__main__":
         best_epoch,
         best_prod_loss,
         best_prod_epoch,
-    ) = train_model(perception_epochs=10000, production_epochs=10000)
+    ) = train_model(perception_epochs=10000, production_epochs=30000)
 
     # test_single_word(
     #     best_rnn,

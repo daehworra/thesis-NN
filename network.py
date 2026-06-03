@@ -235,10 +235,6 @@ class RNN:
                 feedback
             )
 
-            # Slight amplification prevents
-            # hidden-state contraction
-            x_proj *= 1.2
-
             # IMPORTANT:
             # SAME recurrent unit as perception
             h_new = self.hidden_layer.forward(
