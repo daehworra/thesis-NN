@@ -4,6 +4,7 @@ import numpy as np
 
 from network import RNN
 from languages import main_language
+import matplotlib.pyplot as plt
 
 
 # ============================================================
@@ -459,11 +460,11 @@ def test_single_random_word(
         print()
 
     # ========================================================
-    # Free-running autoregressive production
+    # Free-running production
     # ========================================================
 
     print("\n==============================")
-    print("AUTOREGRESSIVE PRODUCTION")
+    print("PRODUCTION")
     print("==============================\n")
 
     final_h = hs[len(inputs) - 1]
@@ -543,27 +544,135 @@ def test_production_for_word(
 
     return word, productions, inputs
 
+def test_all_word_perc(rnn):
+    """Test perception on every word in the vocabulary.
 
+    Returns a list of 0/1 values indicating whether the network's
+    top prediction at the final timestep matches the true word label.
+    """
+
+    results = []
+
+    for word in main_language.words:
+
+        sequence = word.utterance(LENGTH)
+
+        inputs = utterance_to_input(sequence)
+
+        h0 = np.zeros((rnn.hidden_size, 1))
+
+        xs, hs, ys, probs = rnn.forward(inputs, h0)
+
+        # Use final timestep prediction for correctness
+        final_prob = probs[len(probs) - 1].flatten()
+
+        pred_idx = int(np.argmax(final_prob))
+
+        true_idx = main_language.word_labels.index(word.phonseq)
+
+        results.append(1 if pred_idx == true_idx else 0)
+
+    return results
+
+
+def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 30000]):
+    """Run multiple training runs for each epoch value and plot results.
+
+    For each value in `epochs`, this trains `runs` independent models,
+    evaluates perception accuracy across the vocabulary using
+    `test_all_word_perc`, and then plots mean accuracy with error bars.
+
+    Returns a dict mapping epoch -> list of accuracies (floats in [0,1]).
+    """
+
+    all_results = {}
+
+    means = []
+    stds = []
+
+    epoch_values = list(epochs)
+
+    for epoch in epoch_values:
+
+        accuracies = []
+
+        for i in range(runs):
+
+            (
+                best_rnn,
+                best_loss,
+                best_epoch,
+                best_prod_loss,
+                best_prod_epoch,
+            ) = train_model(perception_epochs=epoch, production_epochs=0)
+
+            res = test_all_word_perc(best_rnn)
+
+            # accuracy = fraction of words classified correctly
+            acc = float(np.mean(res)) if res else 0.0
+
+            accuracies.append(acc)
+
+            print(f"[EPOCH TEST] epochs={epoch} run={i+1}/{runs} acc={acc:.3f}")
+
+        all_results[epoch] = accuracies
+
+        means.append(float(np.mean(accuracies)))
+
+        stds.append(float(np.std(accuracies)))
+
+    # Plot mean accuracy with std dev error bars
+    plt.figure()
+
+    plt.errorbar(epoch_values, means, yerr=stds, marker="o", capsize=5)
+
+    plt.xlabel("Training epochs")
+
+    plt.ylabel("Perception accuracy")
+
+    plt.title("Perception accuracy vs training epochs")
+
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    outpath = "perception_epoch_comparison.png"
+
+    plt.savefig(outpath)
+
+    print(f"Saved epoch comparison plot to {outpath}")
+
+    try:
+        plt.show()
+    except Exception:
+        # In headless environments, showing may fail; ignore.
+        pass
+
+    return all_results
 # ============================================================
 # Main
 # ============================================================
 
 if __name__ == "__main__":
-    LENGTH=3
-    (
-        best_rnn,
-        best_loss,
-        best_epoch,
-        best_prod_loss,
-        best_prod_epoch,
-    ) = train_model(perception_epochs=30000, production_epochs=30000)
 
-    test_single_random_word(
-        best_rnn,
-        top_k=12,
-    )
+    LENGTH=1
 
-    test_production_for_word(
-        best_rnn,
-        word_label="pupupu",
-    )
+    epoch_testing_perc()
+
+    # (
+    #     best_rnn,
+    #     best_loss,
+    #     best_epoch,
+    #     best_prod_loss,
+    #     best_prod_epoch,
+    # ) = train_model(perception_epochs=30000, production_epochs=30000)
+
+    # test_single_random_word(
+    #     best_rnn,
+    #     top_k=12,
+    # )
+
+    # test_production_for_word(
+    #     best_rnn,
+    #     word_label="pupupu",
+    # )
