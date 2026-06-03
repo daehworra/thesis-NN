@@ -377,6 +377,7 @@ def train_model(
 # Evaluation utilities
 # ============================================================
 
+
 def print_production_comparison(
     productions,
     targets,
@@ -417,15 +418,20 @@ def print_production_comparison(
         print()
 
 
-def test_single_random_word(
+def test_single_word(
     rnn,
     top_k=3,
+    phonseq=None,
 ):
     """
     Evaluate perception + production on a random word.
     """
-
-    sequence, word = main_language.random_utterance(length=LENGTH)
+    if phonseq is None:
+        sequence, word = main_language.random_utterance(length=LENGTH)
+    else:
+        word_idx= main_language.word_labels.index(phonseq)
+        word = main_language.words[word_idx]
+        sequence = word.utterance(length=LENGTH)
 
     inputs = utterance_to_input(sequence)
 
@@ -574,6 +580,42 @@ def test_all_word_perc(rnn):
 
     return results
 
+def test_all_word_prod(rnn):
+    """Test autoregressive production for every word in the vocabulary.
+
+    Returns the summed per-word mean-squared error across the full
+    production sequence for each word, as compared to the ideal utterance.
+    """
+
+    total_mse = 0.0
+
+    for word in main_language.words:
+
+        sequence = word.perfect(LENGTH)
+
+        inputs = utterance_to_input(sequence)
+
+        h0 = np.zeros((rnn.hidden_size, 1))
+
+        _, hs, _, _ = rnn.forward(inputs, h0)
+
+        final_h = hs[len(inputs) - 1]
+
+        productions, _ = rnn.generate_production_sequence(
+            final_h,
+            len(inputs),
+            teacher_forcing_inputs=None,
+        )
+
+        word_mse = np.mean([
+            np.mean((productions[t] - inputs[t]) ** 2)
+            for t in range(len(inputs))
+        ])
+
+        total_mse += word_mse
+
+    return total_mse
+
 
 def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 30000]):
     """Run multiple training runs for each epoch value and plot results.
@@ -649,6 +691,75 @@ def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
         pass
 
     return all_results
+
+
+def epoch_testing_prod(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 30000]):
+    """Run multiple production training runs for each production epoch value.
+
+    Perception is fixed at 10000 epochs, while production is trained for the
+    varying values in `epochs`. The function evaluates production loss on the
+    full vocabulary using `test_all_word_prod` and plots mean loss vs epochs.
+    """
+
+    all_results = {}
+
+    means = []
+    stds = []
+
+    epoch_values = list(epochs)
+
+    for epoch in epoch_values:
+
+        losses = []
+
+        for i in range(runs):
+
+            (
+                best_rnn,
+                best_loss,
+                best_epoch,
+                best_prod_loss,
+                best_prod_epoch,
+            ) = train_model(perception_epochs=10000, production_epochs=epoch)
+
+            loss = test_all_word_prod(best_rnn)
+
+            losses.append(float(loss))
+
+            print(f"[EPOCH TEST PROD] prod_epochs={epoch} run={i+1}/{runs} loss={loss:.6f}")
+
+        all_results[epoch] = losses
+
+        means.append(float(np.mean(losses)))
+
+        stds.append(float(np.std(losses)))
+
+    plt.figure()
+
+    plt.errorbar(epoch_values, means, yerr=stds, marker="o", capsize=5)
+
+    plt.xlabel("Production training epochs")
+
+    plt.ylabel("Production loss (summed MSE)")
+
+    plt.title("Production loss vs production training epochs")
+
+    plt.grid(True)
+
+    plt.tight_layout()
+
+    outpath = "production_epoch_comparison.png"
+
+    plt.savefig(outpath)
+
+    print(f"Saved production epoch comparison plot to {outpath}")
+
+    try:
+        plt.show()
+    except Exception:
+        pass
+
+    return all_results
 # ============================================================
 # Main
 # ============================================================
@@ -657,7 +768,9 @@ if __name__ == "__main__":
 
     LENGTH=1
 
-    epoch_testing_perc()
+    # epoch_testing_perc()
+
+    epoch_testing_prod()
 
     # (
     #     best_rnn,
@@ -665,12 +778,14 @@ if __name__ == "__main__":
     #     best_epoch,
     #     best_prod_loss,
     #     best_prod_epoch,
-    # ) = train_model(perception_epochs=30000, production_epochs=30000)
+    # ) = train_model(perception_epochs=10000, production_epochs=0)
 
-    # test_single_random_word(
+    # test_single_word(
     #     best_rnn,
     #     top_k=12,
+    #     phonseq='pipiti'
     # )
+
 
     # test_production_for_word(
     #     best_rnn,
