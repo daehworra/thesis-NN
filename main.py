@@ -76,7 +76,7 @@ def prefix_target_distribution(
     Prefix-compatible target distribution.
     """
 
-    prefix = word.phonseq[: step + 1]
+    prefix = word.phonseq[: step//LENGTH + 1]
 
     vec = np.zeros((len(language.word_labels), 1))
 
@@ -132,6 +132,7 @@ def train_perception(
     epochs=10000,
     lr=1e-2,
     print_every=100,
+    dynamic_targets=True,
 ):
     """
     Train perception/classification system.
@@ -147,10 +148,16 @@ def train_perception(
 
         inputs = utterance_to_input(sequence)
 
-        targets = [
-            prefix_target_distribution(word, t)
-            for t in range(len(inputs))
-        ]
+        if dynamic_targets:
+            targets = [
+                prefix_target_distribution(word, t)
+                for t in range(len(inputs))
+            ]
+        else:
+            target_vector = np.zeros((len(main_language.word_labels), 1))
+            word_idx = main_language.words.index(word)
+            target_vector[word_idx] = 1
+            targets = [target_vector for t in range(len(inputs))]
 
         h0 = np.zeros((rnn.hidden_size, 1))
 
@@ -329,6 +336,7 @@ def train_model(
     perception_epochs=10000,
     production_epochs=10000,
     lr=1e-2,
+    dynamic_targets=True,
 ):
     """
     Train full shared-state model.
@@ -348,6 +356,7 @@ def train_model(
         rnn,
         epochs=perception_epochs,
         lr=lr,
+        dynamic_targets=dynamic_targets
     )
 
     print("\n==============================")
@@ -603,7 +612,7 @@ def test_all_word_prod(rnn):
     return total_mse
 
 
-def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 30000]):
+def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 100000], dynamic_targets=True):
     """Run multiple training runs for each epoch value and plot results.
 
     For each value in `epochs`, this trains `runs` independent models,
@@ -632,7 +641,7 @@ def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
                 best_epoch,
                 best_prod_loss,
                 best_prod_epoch,
-            ) = train_model(perception_epochs=epoch, production_epochs=0)
+            ) = train_model(perception_epochs=epoch, production_epochs=0, dynamic_targets=dynamic_targets)
 
             res = test_all_word_perc(best_rnn)
 
@@ -641,7 +650,7 @@ def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
 
             accuracies.append(acc)
 
-            print(f"[EPOCH TEST] epochs={epoch} run={i+1}/{runs} acc={acc:.3f}")
+            print(f"[ITERATION TEST] iterations={epoch} run={i+1}/{runs} acc={acc:.3f}")
 
         all_results[epoch] = accuracies
 
@@ -654,11 +663,11 @@ def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
 
     plt.errorbar(epoch_values, means, yerr=stds, marker="o", capsize=5)
 
-    plt.xlabel("Training epochs")
+    plt.xlabel("Training Iterations")
 
     plt.ylabel("Perception accuracy")
 
-    plt.title("Perception accuracy vs training epochs")
+    plt.title("Perception accuracy vs Iterations")
 
     plt.grid(True)
 
@@ -679,7 +688,7 @@ def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
     return all_results
 
 
-def epoch_testing_prod(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 30000]):
+def epoch_testing_prod(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 30000, 50000, 100000], dynamic_targets=True):
     """Run multiple production training runs for each production epoch value.
 
     Perception is fixed at 10000 epochs, while production is trained for the
@@ -706,13 +715,13 @@ def epoch_testing_prod(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
                 best_epoch,
                 best_prod_loss,
                 best_prod_epoch,
-            ) = train_model(perception_epochs=10000, production_epochs=epoch)
+            ) = train_model(perception_epochs=10000, production_epochs=epoch, dynamic_targets=dynamic_targets)
 
             loss = test_all_word_prod(best_rnn)
 
             losses.append(float(loss))
 
-            print(f"[EPOCH TEST PROD] prod_epochs={epoch} run={i+1}/{runs} loss={loss:.6f}")
+            print(f"[ITERATION TEST PROD] prod_ITERATIONS={epoch} run={i+1}/{runs} loss={loss:.6f}")
 
         all_results[epoch] = losses
 
@@ -724,11 +733,11 @@ def epoch_testing_prod(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
 
     plt.errorbar(epoch_values, means, yerr=stds, marker="o", capsize=5)
 
-    plt.xlabel("Production training epochs")
+    plt.xlabel("Production training iterations")
 
     plt.ylabel("Production loss (summed MSE)")
 
-    plt.title("Production loss vs production training epochs")
+    plt.title("Production loss vs production training iterations")
 
     plt.grid(True)
 
@@ -747,11 +756,13 @@ def epoch_testing_prod(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 3
 
     return all_results
 
-def plot_vector_comparison(production, perfect_input,
+
+def plot_vector_comparison(production, perfect_input, thought_input,
                            production_label="Produced",
-                           perfect_label="Ideal"):
+                           perfect_label="Ideal",
+                           thought_label="Thought"):
     """
-    Plot corresponding vectors from production and perfect_input.
+    Plot corresponding vectors from production and perfect_input and thought_input.
 
     Parameters
     ----------
@@ -759,6 +770,8 @@ def plot_vector_comparison(production, perfect_input,
         List of produced vectors.
     perfect_input : list of array-like
         List of ideal vectors.
+    thought_input : list of array-like
+        List of vectores used to generate production
     production_label : str
         Label for produced vectors.
     perfect_label : str
@@ -786,17 +799,18 @@ def plot_vector_comparison(production, perfect_input,
 
     axes = axes.flatten()
 
-    for i, (prod_vec, ideal_vec) in enumerate(zip(production, perfect_input)):
+    for i, (prod_vec, ideal_vec, thought_vec) in enumerate(zip(production, perfect_input, thought_input)):
         prod_vec = np.asarray(prod_vec)
         ideal_vec = np.asarray(ideal_vec)
+        thought_vec = np.asarray(thought_vec)
 
-        if len(prod_vec) != len(ideal_vec):
+        if len(prod_vec) != len(ideal_vec) != len(thought_vec):
             raise ValueError(
                 f"Vector {i} has mismatched dimensions "
                 f"({len(prod_vec)} vs {len(ideal_vec)})."
             )
 
-        x = np.arange(len(prod_vec))
+        x = erb_bins
 
         axes[i].plot(
             x,
@@ -813,9 +827,17 @@ def plot_vector_comparison(production, perfect_input,
             linewidth=2
         )
 
-        axes[i].set_title(f"Utterance {i+1}")
-        axes[i].set_xlabel("Feature")
-        axes[i].set_ylabel("Value")
+        axes[i].plot(
+            x,
+            thought_vec,
+            ':',
+            label=thought_label,
+            linewidth=2
+        )
+
+        axes[i].set_title(f"Timestep {i+1}")
+        axes[i].set_xlabel("ERB")
+        axes[i].set_ylabel("Activation")
         axes[i].grid(True, alpha=0.3)
         axes[i].legend()
 
@@ -823,7 +845,7 @@ def plot_vector_comparison(production, perfect_input,
     for ax in axes[n_vectors:]:
         ax.set_visible(False)
 
-    fig.suptitle("Produced vs Ideal Vectors", fontsize=16)
+    fig.suptitle("Ideal vs Produced utterance of pituka", fontsize=16)
     fig.tight_layout()
 
     return fig, axes
@@ -836,29 +858,59 @@ if __name__ == "__main__":
 
     LENGTH=1
 
-    # epoch_testing_perc()
+    # epoch_testing_perc(dynamic_targets=False)
 
-    #epoch_testing_prod()
+    # epoch_testing_prod(dynamic_targets=False)
 
-    (
-        best_rnn,
-        best_loss,
-        best_epoch,
-        best_prod_loss,
-        best_prod_epoch,
-    ) = train_model(perception_epochs=10000, production_epochs=30000)
+    # (
+    #     best_rnn,
+    #     best_loss,
+    #     best_epoch,
+    #     best_prod_loss,
+    #     best_prod_epoch,
+    # ) = train_model(perception_epochs=10000, production_epochs=20000, dynamic_targets=False)
 
     # test_single_word(
     #     best_rnn,
     #     top_k=12,
-    #     phonseq='pipiti'
+    #     phonseq='katupa'
+    # )
+    
+    # test_single_word(
+    #     best_rnn,
+    #     top_k=12,
+    #     phonseq='katupa'
+    # )
+
+    # test_single_word(
+    #     best_rnn,
+    #     top_k=12,
+    #     phonseq='katupa'
     # )
 
 
-    _, production, _, perfect_input = test_production_for_word(
-        best_rnn,
-        word_label="katupa",
-    )
+    # _, production, inputs, perfect_input = test_production_for_word(
+    #     best_rnn,
+    #     word_label="pituka",
+    # )
 
-    plot_vector_comparison(production, perfect_input)
-    plt.show()
+    # plot_vector_comparison(production, perfect_input, inputs)
+    # plt.show()
+
+    # _, production, inputs, perfect_input = test_production_for_word(
+    #     best_rnn,
+    #     word_label="pituka",
+    # )
+
+    # plot_vector_comparison(production, perfect_input, inputs)
+    # plt.show()
+
+    # _, production, inputs, perfect_input = test_production_for_word(
+    #     best_rnn,
+    #     word_label="pituka",
+    # )
+
+    # plot_vector_comparison(production, perfect_input, inputs)
+    # plt.show()
+    
+    
