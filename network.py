@@ -47,6 +47,7 @@ class HiddenLayer:
         )
 
 
+
 class OutputLayer:
     """Linear output layer."""
 

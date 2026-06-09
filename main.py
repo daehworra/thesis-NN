@@ -3,7 +3,7 @@
 import numpy as np
 import math
 from network import RNN
-from languages import main_language
+from languages import main_language, beemdelust_language
 import matplotlib.pyplot as plt
 
 
@@ -57,25 +57,16 @@ def utterance_to_input(sequence, erb_bins=erb_bins):
 # Perception targets
 # ============================================================
 
-def onehot(label, language=main_language):
-    """One-hot vocabulary vector."""
-
-    vec = np.zeros((len(language.word_labels), 1))
-
-    vec[language.word_labels.index(label)] = 1
-
-    return vec
-
-
 def prefix_target_distribution(
     word,
     step,
-    language=main_language,
+    language=None,
 ):
     """
     Prefix-compatible target distribution.
     """
-
+    if language is None:
+            language = LANGUAGE
     prefix = word.phonseq[: step//LENGTH + 1]
 
     vec = np.zeros((len(language.word_labels), 1))
@@ -144,7 +135,7 @@ def train_perception(
 
     for epoch in range(epochs):
 
-        sequence, word = main_language.random_utterance(length=LENGTH)
+        sequence, word = LANGUAGE.random_utterance(length=LENGTH)
 
         inputs = utterance_to_input(sequence)
 
@@ -154,8 +145,8 @@ def train_perception(
                 for t in range(len(inputs))
             ]
         else:
-            target_vector = np.zeros((len(main_language.word_labels), 1))
-            word_idx = main_language.words.index(word)
+            target_vector = np.zeros((len(LANGUAGE.word_labels), 1))
+            word_idx = LANGUAGE.words.index(word)
             target_vector[word_idx] = 1
             targets = [target_vector for t in range(len(inputs))]
 
@@ -233,7 +224,7 @@ def train_production(
 
     for epoch in range(epochs):
 
-        sequence, word = main_language.random_utterance(length=LENGTH)
+        sequence, word = LANGUAGE.random_utterance(length=LENGTH)
 
         inputs = utterance_to_input(sequence)
 
@@ -345,7 +336,7 @@ def train_model(
     rnn = RNN(
         input_size=len(erb_bins),
         hidden_size=100,
-        output_size=len(main_language.word_labels),
+        output_size=len(LANGUAGE.word_labels),
     )
 
     print("\n==============================")
@@ -433,10 +424,10 @@ def test_single_word(
     Evaluate perception + production on a random word.
     """
     if phonseq is None:
-        sequence, word = main_language.random_utterance(length=LENGTH)
+        sequence, word = LANGUAGE.random_utterance(length=LENGTH)
     else:
-        word_idx= main_language.word_labels.index(phonseq)
-        word = main_language.words[word_idx]
+        word_idx= LANGUAGE.word_labels.index(phonseq)
+        word = LANGUAGE.words[word_idx]
         sequence = word.utterance(length=LENGTH)
 
     inputs = utterance_to_input(sequence)
@@ -465,7 +456,7 @@ def test_single_word(
         for i in top_indices:
 
             print(
-                f"  {main_language.word_labels[i]}: "
+                f"  {LANGUAGE.word_labels[i]}: "
                 f"{prob[i]:.4f}"
             )
 
@@ -510,10 +501,10 @@ def test_production_for_word(
     """
 
     if word_label is None:
-        sequence, word = main_language.random_utterance(LENGTH)
+        sequence, word = LANGUAGE.random_utterance(LENGTH)
     else:
-        word_idx = main_language.word_labels.index(word_label)
-        word = main_language.words[word_idx]
+        word_idx = LANGUAGE.word_labels.index(word_label)
+        word = LANGUAGE.words[word_idx]
         sequence = word.utterance(LENGTH)
 
     perfect_sequence = word.perfect(LENGTH)
@@ -552,7 +543,7 @@ def test_all_word_perc(rnn):
 
     results = []
 
-    for word in main_language.words:
+    for word in LANGUAGE.words:
 
         sequence = word.utterance(LENGTH)
 
@@ -567,7 +558,7 @@ def test_all_word_perc(rnn):
 
         pred_idx = int(np.argmax(final_prob))
 
-        true_idx = main_language.word_labels.index(word.phonseq)
+        true_idx = LANGUAGE.word_labels.index(word.phonseq)
 
         results.append(1 if pred_idx == true_idx else 0)
 
@@ -582,7 +573,7 @@ def test_all_word_prod(rnn):
 
     total_mse = 0.0
 
-    for word in main_language.words:
+    for word in LANGUAGE.words:
 
         sequence = word.utterance(LENGTH)
         perfect_sequence = word.perfect(LENGTH)
@@ -612,7 +603,67 @@ def test_all_word_prod(rnn):
     return total_mse
 
 
-def epoch_testing_perc(runs=10, epochs=[1000, 3000, 5000, 10000, 15000, 20000, 30000, 40000, 50000, 100000], dynamic_targets=True):
+def lexicon_hidden_state_cosine_similarity(
+    rnn,
+    length=None,
+    language=None,
+    print_table=True,
+    precision=3,
+):
+    """Compute cosine similarities of final hidden states for lexicon items."""
+
+    if language is None:
+        language = LANGUAGE
+
+    if length is None:
+        length = LENGTH
+
+    labels = [word.phonseq for word in language.words]
+
+    final_states = []
+
+    for word in language.words:
+        sequence = word.perfect(length)
+        inputs = utterance_to_input(sequence)
+
+        h0 = np.zeros((rnn.hidden_size, 1))
+        _, hs, _, _ = rnn.forward(inputs, h0)
+
+        final_states.append(hs[len(inputs) - 1].flatten())
+
+    final_states = np.stack(final_states, axis=0)
+
+    norms = np.linalg.norm(final_states, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+
+    similarity_matrix = (
+        final_states @ final_states.T
+    ) / (norms @ norms.T)
+
+    # Clip for numerical stability and avoid small >1 values.
+    similarity_matrix = np.clip(similarity_matrix, -1.0, 1.0)
+
+    if print_table:
+        label_width = max(len(label) for label in labels) + 2
+        value_width = precision + 6
+
+        header = " " * label_width
+        header += " ".join(f"{label:>{value_width}}" for label in labels)
+
+        print("\nLexicon hidden-state cosine similarity:")
+        print(header)
+
+        for i, label in enumerate(labels):
+            row_values = [
+                f"{similarity_matrix[i, j]:{value_width}.{precision}f}"
+                for j in range(len(labels))
+            ]
+            print(f"{label:<{label_width}}" + " ".join(row_values))
+
+    return labels, similarity_matrix
+
+
+def epoch_testing_perc(runs=10, epochs=[20000], dynamic_targets=True):
     """Run multiple training runs for each epoch value and plot results.
 
     For each value in `epochs`, this trains `runs` independent models,
@@ -845,7 +896,7 @@ def plot_vector_comparison(production, perfect_input, thought_input,
     for ax in axes[n_vectors:]:
         ax.set_visible(False)
 
-    fig.suptitle("Ideal vs Produced utterance of pituka", fontsize=16)
+    fig.suptitle("Ideal vs Produced utterance of eu", fontsize=16)
     fig.tight_layout()
 
     return fig, axes
@@ -856,42 +907,34 @@ def plot_vector_comparison(production, perfect_input, thought_input,
 
 if __name__ == "__main__":
 
+    LANGUAGE = beemdelust_language
     LENGTH=1
 
-    # epoch_testing_perc(dynamic_targets=False)
+
+
+    # epoch_testing_perc(dynamic_targets=True)
 
     # epoch_testing_prod(dynamic_targets=False)
 
-    # (
-    #     best_rnn,
-    #     best_loss,
-    #     best_epoch,
-    #     best_prod_loss,
-    #     best_prod_epoch,
-    # ) = train_model(perception_epochs=10000, production_epochs=20000, dynamic_targets=False)
+    (
+        best_rnn,
+        best_loss,
+        best_epoch,
+        best_prod_loss,
+        best_prod_epoch,
+    ) = train_model(perception_epochs=30000, production_epochs=0, dynamic_targets=False)
 
     # test_single_word(
     #     best_rnn,
-    #     top_k=12,
-    #     phonseq='katupa'
-    # )
-    
-    # test_single_word(
-    #     best_rnn,
-    #     top_k=12,
-    #     phonseq='katupa'
+    #     top_k=25,
+    #     phonseq='iu'
     # )
 
-    # test_single_word(
-    #     best_rnn,
-    #     top_k=12,
-    #     phonseq='katupa'
-    # )
-
+(best_rnn)
 
     # _, production, inputs, perfect_input = test_production_for_word(
     #     best_rnn,
-    #     word_label="pituka",
+    #     word_label="eu",
     # )
 
     # plot_vector_comparison(production, perfect_input, inputs)

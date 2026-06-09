@@ -120,6 +120,44 @@ pupupu = Word('pupupu')
 kipiti = Word('kipiti')
 tapika = Word('tapika')
 
+aa = Word('aa')
+ae = Word('ae')
+ai = Word('ai')
+ao = Word('ao')
+au = Word('au')
+
+ea = Word('ea')
+ee = Word('ee')
+ei = Word('ei')
+eo = Word('eo')
+eu = Word('eu')
+
+ia = Word('ia')
+ie = Word('ie')
+ii = Word('ii')
+io = Word('io')
+iu = Word('iu')
+
+oa = Word('oa')
+oe = Word('oe')
+oi = Word('oi')
+oo = Word('oo')
+ou = Word('ou')
+
+ua = Word('ua')
+ue = Word('ue')
+ui = Word('ui')
+uo = Word('uo')
+uu = Word('uu')
+
+vowel_combinations = [
+    aa, ae, ai, ao, au,
+    ea, ee, ei, eo, eu,
+    ia, ie, ii, io, iu,
+    oa, oe, oi, oo, ou,
+    ua, ue, ui, uo, uu
+]
+
 class Language:
     """Container for vocabulary words and random utterance sampling."""
 
@@ -140,3 +178,4 @@ class Language:
 
     
 main_language = Language([pitaku, pituka, pikita, pipiti, katuka, katuti, katupu, katupa, tutapa, pupupu, kipiti, tapika])
+beemdelust_language = Language(vowel_combinations)
